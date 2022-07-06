@@ -3,23 +3,25 @@ import datetime
 from snscrape import modules
 import snscrape
 import os
+import sqlite3
 
+basepath = '../tg.db'
 basedir = os.path.dirname(os.path.abspath(__file__))
 today = datetime.date.today()
 
 def check_exceptions(name):
-    exceptions = {'s'}
+    exceptions = {'s', 'joinchat', 'c', 'addstickers', 'vote'}
     name = name.split('?')[0]
-    if name.endswith("bot"):
+    if name.lower().endswith("bot"):
         return True
     if name.startswith('+'):
-        return True
-    if name == 'joinchat':
         return True
     if 'url=http' in name:
         return True
     if name in exceptions:
         return True
+    
+    return False
     
 
 def get_channels():
@@ -27,30 +29,34 @@ def get_channels():
     return pd.read_csv('channels.csv').drop_duplicates(subset='chname')
 
 def update_channels():
-    
+    conn = sqlite3.connect(basepath)
     channels_df = pd.read_csv('channels.csv')
-    dirs = [d for d in os.listdir(basedir) if os.path.isdir(d)]
-    for dirname in dirs:
-        fnames = os.listdir(os.path.join(basedir, dirname))
-        for fname in fnames:
-            if fname.startswith('links') and fname.endswith('.csv.gz'):
-                links = pd.read_csv(os.path.join(basedir, dirname, fname))
-                links.dropna(inplace=True)
-                links.rename(columns={'target_link': 'link', 'target_name': 'chname'}, inplace=True)
-                links['last_updated'] = None
-                channels_df = pd.concat([channels_df, links[['link', 'chname', 'last_updated']]], axis=0)
+    
 
-                update_date = fname.split("_")[-1].split('.')[0]
-                update_date = datetime.datetime.strptime(update_date, '%y%m%d')
-                # channels_df[channels_df['chname'] == dirname]['last_updated'] = update_date
-                daterow = pd.DataFrame([['nolink', dirname, update_date]], columns=['link', 'chname', 'last_updated'])
+    query = """SELECT target_link link, target_name chname FROM links"""
+    scrapped_links = pd.read_sql(query, con=conn)
+    print(scrapped_links.head())
+    scrapped_links = pd.concat([channels_df.drop(columns=['last_updated']), scrapped_links])
+    print(scrapped_links.head())
+    
+    scrapped_links.dropna(subset=['chname'], inplace=True)
+    scrapped_links['chname'] = scrapped_links['chname'].apply(lambda x: x.lower())
+    scrapped_links.drop_duplicates(subset="chname", keep='last', inplace=True)
+    print(scrapped_links.head())
+    scrapped_links = scrapped_links[~scrapped_links['chname'].apply(check_exceptions)].copy()
+    
 
-                channels_df = pd.concat([channels_df, daterow], axis=0)
-
+    query = """SELECT chname, last_updated FROM updates"""
+    updates = pd.read_sql(query, con=conn)
+    updates['chname'] = updates['chname'].apply(lambda x: x.lower())
+    print(updates.head())
+    conn.close()
+    scrapped_links = scrapped_links.merge(updates, on='chname', how='left')
+    print(scrapped_links.head())
     # backup old list
     os.rename('channels.csv', 'channels.csv.bkp.{}'.format(today.strftime('%y%m%d')))
-    channels_df.drop_duplicates(subset="chname", keep='last', inplace=True)
-    channels_df.to_csv('channels.csv', index=False)
+    scrapped_links.drop_duplicates(subset="chname", keep='last', inplace=True)
+    scrapped_links[['link', 'chname', 'last_updated']].to_csv('channels.csv', index=False)
     
 
 def scrape(name):
@@ -68,7 +74,7 @@ def scrape(name):
     return content, channels
 
 def scrape_step(limit=None):
-    for i, (link, name, last_updated) in enumerate(get_channels().values):
+    for i, (link, name, last_updated) in enumerate(get_channels()[['link', 'chname', 'last_updated']].values):
         if not (limit is None):
             if i >= limit:
                 update_channels()
@@ -84,19 +90,21 @@ def scrape_step(limit=None):
                 print("channel {} not scrapped due to exception: {}".format(name, e))
 
             content_df = pd.DataFrame(content, columns=['url', 'content', 'date'])
-            path = os.path.join(basedir, name)
-            os.makedirs(path, exist_ok=True)
-            savename = 'content_{}_{}.csv.gz'.format(name, today.strftime('%y%m%d'))
-            content_df.to_csv(os.path.join(path, savename), index=False, compression='gzip')
-
+            content_df['channel'] = name
+            last_updated = pd.DataFrame([(name, today)], columns=['chname', 'last_updated'])
             channels_df = pd.DataFrame(channels, columns=['source_name', 'target_link', 'target_name', 'source_link'])
-            savename = 'links_{}_{}.csv.gz'.format(name, today.strftime('%y%m%d'))
-            channels_df.to_csv(os.path.join(path, savename), index=False, compression='gzip')
+
+            with sqlite3.connect(basepath) as conn:
+                content_df.to_sql('content', con=conn, if_exists='append')
+                channels_df.to_sql('links', con=conn, if_exists='append')
+                last_updated.to_sql('updates', con=conn, if_exists='append')
+
         else:
             print('skiping as already parsed, last updated: {}'.format(last_updated))
 
     update_channels()
 
 if __name__ == "__main__":
-    update_channels()
-    scrape_step()
+    while True:
+        update_channels()
+        scrape_step()
