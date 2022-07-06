@@ -6,7 +6,6 @@ import os
 import sqlite3
 
 basepath = '../tg.db'
-basedir = os.path.dirname(os.path.abspath(__file__))
 today = datetime.date.today()
 
 def check_exceptions(name):
