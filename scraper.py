@@ -87,6 +87,7 @@ def scrape_step(limit=None):
                 content, channels = scrape(name)
             except snscrape.base.ScraperException as e:
                 print("channel {} not scrapped due to exception: {}".format(name, e))
+                continue
 
             content_df = pd.DataFrame(content, columns=['url', 'content', 'date'])
             content_df['channel'] = name
