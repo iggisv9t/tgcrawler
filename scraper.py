@@ -5,58 +5,64 @@ import snscrape
 import os
 import sqlite3
 
-basepath = '../tg.db'
+basepath = "../tg.db"
 today = datetime.date.today()
 
+
 def check_exceptions(name):
-    exceptions = {'s', 'joinchat', 'c', 'addstickers', 'vote'}
-    name = name.split('?')[0]
+    exceptions = {"s", "joinchat", "c", "addstickers", "vote"}
+    name = name.split("?")[0]
     if name.lower().endswith("bot"):
         return True
-    if name.startswith('+'):
+    if name.startswith("+"):
         return True
-    if 'url=http' in name:
+    if "url=http" in name:
         return True
     if name in exceptions:
         return True
-    
+
     return False
-    
+
 
 def get_channels():
-    path = 'channels.csv'
-    return pd.read_csv('channels.csv').drop_duplicates(subset='chname')
+    path = "channels.csv"
+    return pd.read_csv("channels.csv").drop_duplicates(subset="chname")
+
 
 def update_channels():
     conn = sqlite3.connect(basepath)
-    channels_df = pd.read_csv('channels.csv')
-    
+    channels_df = pd.read_csv("channels.csv")
 
     query = """SELECT target_link link, target_name chname FROM links"""
     scrapped_links = pd.read_sql(query, con=conn)
     print(scrapped_links.head())
-    scrapped_links = pd.concat([channels_df.drop(columns=['last_updated']), scrapped_links])
+    scrapped_links = pd.concat(
+        [channels_df.drop(columns=["last_updated"]), scrapped_links]
+    )
     print(scrapped_links.head())
-    
-    scrapped_links.dropna(subset=['chname'], inplace=True)
-    scrapped_links['chname'] = scrapped_links['chname'].apply(lambda x: x.lower())
-    scrapped_links.drop_duplicates(subset="chname", keep='last', inplace=True)
+
+    scrapped_links.dropna(subset=["chname"], inplace=True)
+    scrapped_links["chname"] = scrapped_links["chname"].apply(lambda x: x.lower())
+    scrapped_links.drop_duplicates(subset="chname", keep="last", inplace=True)
     print(scrapped_links.head())
-    scrapped_links = scrapped_links[~scrapped_links['chname'].apply(check_exceptions)].copy()
-    
+    scrapped_links = scrapped_links[
+        ~scrapped_links["chname"].apply(check_exceptions)
+    ].copy()
 
     query = """SELECT chname, last_updated FROM updates"""
     updates = pd.read_sql(query, con=conn)
-    updates['chname'] = updates['chname'].apply(lambda x: x.lower())
+    updates["chname"] = updates["chname"].apply(lambda x: x.lower())
     print(updates.head())
     conn.close()
-    scrapped_links = scrapped_links.merge(updates, on='chname', how='left')
+    scrapped_links = scrapped_links.merge(updates, on="chname", how="left")
     print(scrapped_links.head())
     # backup old list
-    os.rename('channels.csv', 'channels.csv.bkp.{}'.format(today.strftime('%y%m%d')))
-    scrapped_links.drop_duplicates(subset="chname", keep='last', inplace=True)
-    scrapped_links[['link', 'chname', 'last_updated']].to_csv('channels.csv', index=False)
-    
+    os.rename("channels.csv", "channels.csv.bkp.{}".format(today.strftime("%y%m%d")))
+    scrapped_links.drop_duplicates(subset="chname", keep="last", inplace=True)
+    scrapped_links[["link", "chname", "last_updated"]].to_csv(
+        "channels.csv", index=False
+    )
+
 
 def scrape(name):
     scraper = modules.telegram.TelegramChannelScraper(name)
@@ -67,19 +73,24 @@ def scrape(name):
             content.append((item.url, item.content, item.date))
         if hasattr(item, "outlinks"):
             for link in item.outlinks:
-                if 't.me' in link:
-                    channels.append((name, link, link.split('/')[3].split('?')[0], item.url))
+                if "t.me" in link:
+                    channels.append(
+                        (name, link, link.split("/")[3].split("?")[0], item.url)
+                    )
 
     return content, channels
 
+
 def scrape_step(limit=None):
-    for i, (link, name, last_updated) in enumerate(get_channels()[['link', 'chname', 'last_updated']].values):
+    for i, (link, name, last_updated) in enumerate(
+        get_channels()[["link", "chname", "last_updated"]].values
+    ):
         if not (limit is None):
             if i >= limit:
                 update_channels()
                 break
         if check_exceptions(name):
-            print('Entity {} skipped'.format(name))
+            print("Entity {} skipped".format(name))
             continue
         print("{} scraping channel: {}".format(i, name))
         if pd.isnull(last_updated):
@@ -89,20 +100,26 @@ def scrape_step(limit=None):
                 print("channel {} not scrapped due to exception: {}".format(name, e))
                 continue
 
-            content_df = pd.DataFrame(content, columns=['url', 'content', 'date'])
-            content_df['channel'] = name
-            last_updated = pd.DataFrame([(name, today)], columns=['chname', 'last_updated'])
-            channels_df = pd.DataFrame(channels, columns=['source_name', 'target_link', 'target_name', 'source_link'])
+            content_df = pd.DataFrame(content, columns=["url", "content", "date"])
+            content_df["channel"] = name
+            last_updated = pd.DataFrame(
+                [(name, today)], columns=["chname", "last_updated"]
+            )
+            channels_df = pd.DataFrame(
+                channels,
+                columns=["source_name", "target_link", "target_name", "source_link"],
+            )
 
             with sqlite3.connect(basepath) as conn:
-                content_df.to_sql('content', con=conn, if_exists='append')
-                channels_df.to_sql('links', con=conn, if_exists='append')
-                last_updated.to_sql('updates', con=conn, if_exists='append')
+                content_df.to_sql("content", con=conn, if_exists="append")
+                channels_df.to_sql("links", con=conn, if_exists="append")
+                last_updated.to_sql("updates", con=conn, if_exists="append")
 
         else:
-            print('skiping as already parsed, last updated: {}'.format(last_updated))
+            print("skiping as already parsed, last updated: {}".format(last_updated))
 
     update_channels()
+
 
 if __name__ == "__main__":
     while True:
