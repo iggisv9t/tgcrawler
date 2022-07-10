@@ -35,8 +35,9 @@ def update_channels():
     channels_df = pd.read_csv(path)
 
     query = """SELECT target_link link, target_name chname FROM links"""
-    scrapped_links = pd.read_sql(query, con=conn)\
-            .drop_duplicates(subset=['link', 'chname'], keep='first')
+    scrapped_links = pd.read_sql(query, con=conn).drop_duplicates(
+        subset=["link", "chname"], keep="first"
+    )
     print(scrapped_links.head())
     scrapped_links = pd.concat(
         [channels_df.drop(columns=["last_updated"]), scrapped_links]
@@ -45,14 +46,16 @@ def update_channels():
 
     scrapped_links.dropna(subset=["chname"], inplace=True)
     scrapped_links["chname"] = scrapped_links["chname"].apply(lambda x: x.lower())
-    degree_dict = Counter(scrapped_links['chname'].values)
+    degree_dict = Counter(scrapped_links["chname"].values)
     scrapped_links.drop_duplicates(subset="chname", keep="last", inplace=True)
     scrapped_links = scrapped_links[
         ~scrapped_links["chname"].apply(check_exceptions)
     ].copy()
-    scrapped_links['degree'] = scrapped_links['chname'].apply(lambda x: degree_dict.get(x, 0))
+    scrapped_links["degree"] = scrapped_links["chname"].apply(
+        lambda x: degree_dict.get(x, 0)
+    )
     print(scrapped_links.head())
-    
+
     query = """SELECT chname, last_updated FROM updates"""
     updates = pd.read_sql(query, con=conn)
     updates["chname"] = updates["chname"].apply(lambda x: x.lower())
@@ -62,8 +65,8 @@ def update_channels():
     print(scrapped_links.head())
     # backup old list
     os.rename("channels.csv", "channels.csv.bkp.{}".format(today.strftime("%y%m%d")))
-    
-    scrapped_links.sort_values('degree', ascending=False)
+
+    scrapped_links.sort_values("degree", ascending=False)
     scrapped_links[["link", "chname", "last_updated", "degree"]].to_csv(
         "channels.csv", index=False
     )
