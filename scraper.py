@@ -23,9 +23,13 @@ def check_exceptions(name):
     return False
     
 
-def get_channels():
+def get_channels(random=False):
     path = 'channels.csv'
-    return pd.read_csv('channels.csv').drop_duplicates(subset='chname')
+    if random:
+        return pd.read_csv(path).drop_duplicates(subset='chname').sample(frac=1)
+    else:
+        return pd.read_csv(path).drop_duplicates(subset='chname')
+
 
 def update_channels():
     conn = sqlite3.connect(basepath)
@@ -72,8 +76,8 @@ def scrape(name):
 
     return content, channels
 
-def scrape_step(limit=None):
-    for i, (link, name, last_updated) in enumerate(get_channels()[['link', 'chname', 'last_updated']].values):
+def scrape_step(limit=None, random=False):
+    for i, (link, name, last_updated) in enumerate(get_channels(random)[['link', 'chname', 'last_updated']].values):
         if not (limit is None):
             if i >= limit:
                 update_channels()
@@ -107,4 +111,4 @@ def scrape_step(limit=None):
 if __name__ == "__main__":
     while True:
         update_channels()
-        scrape_step()
+        scrape_step(random=True)
