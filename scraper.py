@@ -5,6 +5,7 @@ import snscrape
 import os
 import sqlite3
 from collections import Counter
+import numpy as np
 
 basepath = "../tg.db"
 today = datetime.date.today()
@@ -37,8 +38,14 @@ def get_channels(random=False):
 def update_channels():
     conn = sqlite3.connect(basepath)
     channels_df = pd.read_csv(path)
+    channels_df.dropna(subset=['chname'], inplace=True)
+    channels_df = channels_df[pd.isnull(channels_df['last_updated'])]
+    mask = np.array([c.lower() in str(l).lower() for l, c in channels_df[['link', 'chname']].values])
+    
+    channels_df = channels_df[~mask].copy()
 
-    query = """SELECT target_link link, target_name chname FROM links"""
+    query = """SELECT target_link link, target_name chname FROM links
+                WHERE target_name != source_name"""
     scrapped_links = pd.read_sql(query, con=conn).drop_duplicates(
         subset=["link", "chname"], keep="first"
     )
@@ -50,6 +57,7 @@ def update_channels():
 
     scrapped_links.dropna(subset=["chname"], inplace=True)
     scrapped_links["chname"] = scrapped_links["chname"].apply(lambda x: x.lower())
+    
     degree_dict = Counter(scrapped_links["chname"].values)
     scrapped_links.drop_duplicates(subset="chname", keep="last", inplace=True)
     scrapped_links = scrapped_links[
@@ -70,7 +78,8 @@ def update_channels():
     # backup old list
     os.rename("channels.csv", "channels.csv.bkp.{}".format(today.strftime("%y%m%d")))
 
-    scrapped_links.sort_values("degree", ascending=False)
+    scrapped_links.sort_values("degree", ascending=False, inplace=True)
+    scrapped_links = scrapped_links[pd.isnull(scrapped_links['last_updated'])]
     scrapped_links[["link", "chname", "last_updated", "degree"]].to_csv(
         "channels.csv", index=False
     )
@@ -133,4 +142,4 @@ def scrape_step(limit=None, random=False):
 if __name__ == "__main__":
     while True:
         update_channels()
-        scrape_step(random=True)
+        scrape_step(random=False)
