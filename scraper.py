@@ -142,4 +142,4 @@ def scrape_step(limit=None, random=False):
 if __name__ == "__main__":
     while True:
         update_channels()
-        scrape_step(random=False)
+        scrape_step(random=False, limit=10)
