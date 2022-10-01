@@ -20,7 +20,10 @@ Database will be created automatically, just edit the `basepath` variable. `chan
 https://antcating.github.io/telegram_connections_frontend/
 
 # Contributing
-Please open issue before any pull request.
+1. Please open issue before any pull request.
+2. All code contributions require forks
+3. Suggest features and ideas in [discussions](https://github.com/iggisv9t/tgcrawler/discussions)
+4. Feel free to develop it in your own way in your fork
 
 # Gratitude
 Big thanks to [@antcating](https://github.com/antcating) for inspiration  
