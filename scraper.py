@@ -4,10 +4,11 @@ from snscrape import modules
 import snscrape
 import os
 import sqlite3
+from sqlalchemy import create_engine, inspect
 from collections import Counter
 import numpy as np
 
-basepath = "../tg.db"
+basepath = "tg.db"
 today = datetime.date.today()
 path = "channels.csv"
 
@@ -36,28 +37,36 @@ def get_channels(random=False):
 
 
 def update_channels():
-    conn = sqlite3.connect(basepath)
+    
     channels_df = pd.read_csv(path)
     channels_df.dropna(subset=['chname'], inplace=True)
     channels_df = channels_df[pd.isnull(channels_df['last_updated'])]
-    mask = np.array([c.lower() in str(l).lower() for l, c in channels_df[['link', 'chname']].values])
+    # mask = np.array([c.lower() in str(l).lower() 
+    #         for l, c in channels_df[['link', 'chname']].values])
     
-    channels_df = channels_df[~mask].copy()
+    # channels_df = channels_df[mask].copy()
 
-    query = """SELECT target_link link, target_name chname FROM links
-                WHERE target_name != source_name"""
-    scrapped_links = pd.read_sql(query, con=conn).drop_duplicates(
-        subset=["link", "chname"], keep="first"
-    )
-    print(scrapped_links.head())
-    scrapped_links = pd.concat(
-        [channels_df.drop(columns=["last_updated"]), scrapped_links]
-    )
-    print(scrapped_links.head())
+    conn = create_engine('sqlite:///' + basepath)
+    insp = inspect(conn)
+    if insp.has_table("links", schema="main"):
+        query = """SELECT target_link link, target_name chname FROM links
+                    WHERE target_name != source_name"""
+        scrapped_links = pd.read_sql(query, con=conn).drop_duplicates(
+            subset=["link", "chname"], keep="first"
+        )
+        print(scrapped_links.head())
+        scrapped_links = pd.concat(
+            [channels_df.drop(columns=["last_updated"]), scrapped_links]
+        )
+        print(scrapped_links.head())
+    else:
+        scrapped_links = channels_df
 
+    print(scrapped_links.head())
     scrapped_links.dropna(subset=["chname"], inplace=True)
     scrapped_links["chname"] = scrapped_links["chname"].apply(lambda x: x.lower())
     
+    print(scrapped_links.head())
     degree_dict = Counter(scrapped_links["chname"].values)
     scrapped_links.drop_duplicates(subset="chname", keep="last", inplace=True)
     scrapped_links = scrapped_links[
@@ -68,12 +77,13 @@ def update_channels():
     )
     print(scrapped_links.head())
 
-    query = """SELECT chname, last_updated FROM updates"""
-    updates = pd.read_sql(query, con=conn)
-    updates["chname"] = updates["chname"].apply(lambda x: x.lower())
-    print(updates.head())
-    conn.close()
-    scrapped_links = scrapped_links.merge(updates, on="chname", how="left")
+    if insp.has_table("updates", schema="main"):
+        query = """SELECT chname, last_updated FROM updates"""
+        updates = pd.read_sql(query, con=conn)
+        updates["chname"] = updates["chname"].apply(lambda x: x.lower())
+        print(updates.head())
+        # conn.close()
+        scrapped_links = scrapped_links.merge(updates, on="chname", how="left")
     print(scrapped_links.head())
     # backup old list
     os.rename("channels.csv", "channels.csv.bkp.{}".format(today.strftime("%y%m%d")))
@@ -142,4 +152,4 @@ def scrape_step(limit=None, random=False):
 if __name__ == "__main__":
     while True:
         update_channels()
-        scrape_step(random=False, limit=10)
+        scrape_step(random=np.random.choice([True, False]), limit=10)
