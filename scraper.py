@@ -14,7 +14,7 @@ path = "channels.csv"
 
 
 def check_exceptions(name):
-    exceptions = {"s", "joinchat", "c", "addstickers", "vote"}
+    exceptions = {"s", "joinchat", "c", "addstickers", "vote", ""}
     name = name.split("?")[0]
     if name.lower().endswith("bot"):
         return True
@@ -29,24 +29,24 @@ def check_exceptions(name):
 
 
 def get_channels(random=False):
-    path = 'channels.csv'
+    path = "channels.csv"
     if random:
-        return pd.read_csv(path).drop_duplicates(subset='chname').sample(frac=1)
+        return pd.read_csv(path).drop_duplicates(subset="chname").sample(frac=1)
     else:
-        return pd.read_csv(path).drop_duplicates(subset='chname')
+        return pd.read_csv(path).drop_duplicates(subset="chname")
 
 
 def update_channels():
-    
+
     channels_df = pd.read_csv(path)
-    channels_df.dropna(subset=['chname'], inplace=True)
-    channels_df = channels_df[pd.isnull(channels_df['last_updated'])]
-    # mask = np.array([c.lower() in str(l).lower() 
+    channels_df.dropna(subset=["chname"], inplace=True)
+    channels_df = channels_df[pd.isnull(channels_df["last_updated"])]
+    # mask = np.array([c.lower() in str(l).lower()
     #         for l, c in channels_df[['link', 'chname']].values])
-    
+
     # channels_df = channels_df[mask].copy()
 
-    conn = create_engine('sqlite:///' + basepath)
+    conn = create_engine("sqlite:///" + basepath)
     insp = inspect(conn)
     if insp.has_table("links", schema="main"):
         query = """SELECT target_link link, target_name chname FROM links
@@ -65,7 +65,7 @@ def update_channels():
     print(scrapped_links.head())
     scrapped_links.dropna(subset=["chname"], inplace=True)
     scrapped_links["chname"] = scrapped_links["chname"].apply(lambda x: x.lower())
-    
+
     print(scrapped_links.head())
     degree_dict = Counter(scrapped_links["chname"].values)
     scrapped_links.drop_duplicates(subset="chname", keep="last", inplace=True)
@@ -89,7 +89,7 @@ def update_channels():
     os.rename("channels.csv", "channels.csv.bkp.{}".format(today.strftime("%y%m%d")))
 
     scrapped_links.sort_values("degree", ascending=False, inplace=True)
-    scrapped_links = scrapped_links[pd.isnull(scrapped_links['last_updated'])]
+    scrapped_links = scrapped_links[pd.isnull(scrapped_links["last_updated"])]
     scrapped_links[["link", "chname", "last_updated", "degree"]].to_csv(
         "channels.csv", index=False
     )
@@ -111,8 +111,11 @@ def scrape(name):
 
     return content, channels
 
+
 def scrape_step(limit=None, random=False):
-    for i, (link, name, last_updated) in enumerate(get_channels(random)[['link', 'chname', 'last_updated']].values):
+    for i, (link, name, last_updated) in enumerate(
+        get_channels(random)[["link", "chname", "last_updated"]].values
+    ):
         if not (limit is None):
             if i >= limit:
                 update_channels()
