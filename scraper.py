@@ -59,7 +59,7 @@ def update_channels():
         )
         print(scrapped_links.head())
         scrapped_links = pd.concat(
-            [channels_df[['link', 'chname', 'degree']], scrapped_links]
+            [channels_df[["link", "chname", "degree"]], scrapped_links]
         )
         print(scrapped_links.head())
     else:
@@ -79,15 +79,13 @@ def update_channels():
 
     # check if already scrapped
     # TODO: move it to scraping
-    
+
     print(scrapped_links.head())
     # backup old list
     os.rename("channels.csv", "channels.csv.bkp.{}".format(today.strftime("%y%m%d")))
 
     scrapped_links.sort_values("degree", ascending=False, inplace=True)
-    scrapped_links[["link", "chname", "degree"]].to_csv(
-        "channels.csv", index=False
-    )
+    scrapped_links[["link", "chname", "degree"]].to_csv("channels.csv", index=False)
 
 
 def scrape(name):
@@ -100,19 +98,21 @@ def scrape(name):
         if hasattr(item, "outlinks"):
             for link in item.outlinks:
                 if "t.me" in link:
-                    # TODO: fix links like utm_source=t.me 
+                    # TODO: fix links like utm_source=t.me
                     channels.append(
                         (name, link, link.split("/")[3].split("?")[0], item.url)
                     )
 
     return content, channels
 
+
 def is_updated(chname):
     conn = create_engine("sqlite:///" + basepath)
     insp = inspect(conn)
     if insp.has_table("updates", schema="main"):
-        query = """SELECT * FROM updates WHERE LOWER(chname) = '{}'"""\
-                .format(str(chname).lower())
+        query = """SELECT * FROM updates WHERE LOWER(chname) = '{}'""".format(
+            str(chname).lower()
+        )
         updates = pd.read_sql(query, con=conn)
         if updates.shape[0] > 0:
             return True
@@ -121,10 +121,9 @@ def is_updated(chname):
     else:
         return False
 
+
 def scrape_step(limit=None, random=False):
-    for i, name in enumerate(
-        get_channels(random)["chname"].values
-    ):
+    for i, name in enumerate(get_channels(random)["chname"].values):
         if not (limit is None):
             if i >= limit:
                 update_channels()
