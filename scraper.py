@@ -13,9 +13,9 @@ today = datetime.date.today()
 path = "channels.csv"
 
 
-def check_exceptions(name):
+def is_exception(name):
     exceptions = {"s", "joinchat", "c", "addstickers", "vote", ""}
-    name = name.split("?")[0]
+    name = str(name).split("?")[0]
     if name.lower().endswith("bot"):
         return True
     if name.startswith("+"):
@@ -37,10 +37,10 @@ def get_channels(random=False):
 
 
 def update_channels():
-
+    # load seed list
     channels_df = pd.read_csv(path)
     channels_df.dropna(subset=["chname"], inplace=True)
-    channels_df = channels_df[pd.isnull(channels_df["last_updated"])]
+    # channels_df = channels_df[pd.isnull(channels_df["last_updated"])]
     # mask = np.array([c.lower() in str(l).lower()
     #         for l, c in channels_df[['link', 'chname']].values])
 
@@ -48,15 +48,18 @@ def update_channels():
 
     conn = create_engine("sqlite:///" + basepath)
     insp = inspect(conn)
+    # if not a first run
     if insp.has_table("links", schema="main"):
-        query = """SELECT target_link link, target_name chname FROM links
-                    WHERE target_name != source_name"""
+        query = """SELECT DISTINCT target_link link, target_name chname,
+                 COUNT(*) degree FROM links
+                WHERE target_name != source_name
+                GROUP BY target_name"""
         scrapped_links = pd.read_sql(query, con=conn).drop_duplicates(
             subset=["link", "chname"], keep="first"
         )
         print(scrapped_links.head())
         scrapped_links = pd.concat(
-            [channels_df.drop(columns=["last_updated"]), scrapped_links]
+            [channels_df[['link', 'chname', 'degree']], scrapped_links]
         )
         print(scrapped_links.head())
     else:
@@ -67,30 +70,22 @@ def update_channels():
     scrapped_links["chname"] = scrapped_links["chname"].apply(lambda x: x.lower())
 
     print(scrapped_links.head())
-    degree_dict = Counter(scrapped_links["chname"].values)
+
     scrapped_links.drop_duplicates(subset="chname", keep="last", inplace=True)
     scrapped_links = scrapped_links[
-        ~scrapped_links["chname"].apply(check_exceptions)
+        ~scrapped_links["chname"].apply(is_exception)
     ].copy()
-    scrapped_links["degree"] = scrapped_links["chname"].apply(
-        lambda x: degree_dict.get(x, 0)
-    )
     print(scrapped_links.head())
 
-    if insp.has_table("updates", schema="main"):
-        query = """SELECT chname, last_updated FROM updates"""
-        updates = pd.read_sql(query, con=conn)
-        updates["chname"] = updates["chname"].apply(lambda x: x.lower())
-        print(updates.head())
-        # conn.close()
-        scrapped_links = scrapped_links.merge(updates, on="chname", how="left")
+    # check if already scrapped
+    # TODO: move it to scraping
+    
     print(scrapped_links.head())
     # backup old list
     os.rename("channels.csv", "channels.csv.bkp.{}".format(today.strftime("%y%m%d")))
 
     scrapped_links.sort_values("degree", ascending=False, inplace=True)
-    scrapped_links = scrapped_links[pd.isnull(scrapped_links["last_updated"])]
-    scrapped_links[["link", "chname", "last_updated", "degree"]].to_csv(
+    scrapped_links[["link", "chname", "degree"]].to_csv(
         "channels.csv", index=False
     )
 
@@ -105,26 +100,40 @@ def scrape(name):
         if hasattr(item, "outlinks"):
             for link in item.outlinks:
                 if "t.me" in link:
+                    # TODO: fix links like utm_source=t.me 
                     channels.append(
                         (name, link, link.split("/")[3].split("?")[0], item.url)
                     )
 
     return content, channels
 
+def is_updated(chname):
+    conn = create_engine("sqlite:///" + basepath)
+    insp = inspect(conn)
+    if insp.has_table("updates", schema="main"):
+        query = """SELECT * FROM updates WHERE LOWER(chname) = '{}'"""\
+                .format(str(chname).lower())
+        updates = pd.read_sql(query, con=conn)
+        if updates.shape[0] > 0:
+            return True
+        else:
+            return False
+    else:
+        return False
 
 def scrape_step(limit=None, random=False):
-    for i, (link, name, last_updated) in enumerate(
-        get_channels(random)[["link", "chname", "last_updated"]].values
+    for i, name in enumerate(
+        get_channels(random)["chname"].values
     ):
         if not (limit is None):
             if i >= limit:
                 update_channels()
                 break
-        if check_exceptions(name):
+        if is_exception(name):
             print("Entity {} skipped".format(name))
             continue
         print("{} scraping channel: {}".format(i, name))
-        if pd.isnull(last_updated):
+        if not is_updated(name):
             try:
                 content, channels = scrape(name)
             except snscrape.base.ScraperException as e:
