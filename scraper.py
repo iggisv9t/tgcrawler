@@ -5,13 +5,18 @@ import snscrape
 import os
 import sqlite3
 from sqlalchemy import create_engine, inspect
-from collections import Counter
 import numpy as np
+import argparse
 
 basepath = "tg.db"
 today = datetime.date.today()
-path = "channels.csv"
+defaultpath = "channels.csv"
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--channel')
+parser.add_argument('--ignoreupdated', default=False)
+parser.add_argument('--seed', default=defaultpath)
+args = parser.parse_args()
 
 def is_exception(name):
     exceptions = {"s", "joinchat", "c", "addstickers", "vote", ""}
@@ -29,7 +34,7 @@ def is_exception(name):
 
 
 def get_channels(random=False):
-    path = "channels.csv"
+    path = args.seed
     if random:
         return pd.read_csv(path).drop_duplicates(subset="chname").sample(frac=1)
     else:
@@ -37,14 +42,10 @@ def get_channels(random=False):
 
 
 def update_channels():
+    path = args.seed
     # load seed list
     channels_df = pd.read_csv(path)
     channels_df.dropna(subset=["chname"], inplace=True)
-    # channels_df = channels_df[pd.isnull(channels_df["last_updated"])]
-    # mask = np.array([c.lower() in str(l).lower()
-    #         for l, c in channels_df[['link', 'chname']].values])
-
-    # channels_df = channels_df[mask].copy()
 
     conn = create_engine("sqlite:///" + basepath)
     insp = inspect(conn)
@@ -59,7 +60,7 @@ def update_channels():
         )
         print(scrapped_links.head())
         scrapped_links = pd.concat(
-            [channels_df[["link", "chname", "degree"]], scrapped_links]
+            [channels_df[['link', 'chname', 'degree']], scrapped_links]
         )
         print(scrapped_links.head())
     else:
@@ -79,13 +80,15 @@ def update_channels():
 
     # check if already scrapped
     # TODO: move it to scraping
-
+    
     print(scrapped_links.head())
     # backup old list
-    os.rename("channels.csv", "channels.csv.bkp.{}".format(today.strftime("%y%m%d")))
+    os.rename(path, path + ".bkp.{}".format(today.strftime("%y%m%d")))
 
     scrapped_links.sort_values("degree", ascending=False, inplace=True)
-    scrapped_links[["link", "chname", "degree"]].to_csv("channels.csv", index=False)
+    scrapped_links[["link", "chname", "degree"]].to_csv(
+        path, index=False
+    )
 
 
 def scrape(name):
@@ -98,21 +101,19 @@ def scrape(name):
         if hasattr(item, "outlinks"):
             for link in item.outlinks:
                 if "t.me" in link:
-                    # TODO: fix links like utm_source=t.me
+                    # TODO: fix links like utm_source=t.me 
                     channels.append(
                         (name, link, link.split("/")[3].split("?")[0], item.url)
                     )
 
     return content, channels
 
-
 def is_updated(chname):
     conn = create_engine("sqlite:///" + basepath)
     insp = inspect(conn)
     if insp.has_table("updates", schema="main"):
-        query = """SELECT * FROM updates WHERE LOWER(chname) = '{}'""".format(
-            str(chname).lower()
-        )
+        query = """SELECT * FROM updates WHERE LOWER(chname) = '{}'"""\
+                .format(str(chname).lower())
         updates = pd.read_sql(query, con=conn)
         if updates.shape[0] > 0:
             return True
@@ -121,9 +122,8 @@ def is_updated(chname):
     else:
         return False
 
-
-def scrape_step(limit=None, random=False):
-    for i, name in enumerate(get_channels(random)["chname"].values):
+def scrape_step(channels, limit=None):
+    for i, name in enumerate(channels):
         if not (limit is None):
             if i >= limit:
                 update_channels()
@@ -132,7 +132,7 @@ def scrape_step(limit=None, random=False):
             print("Entity {} skipped".format(name))
             continue
         print("{} scraping channel: {}".format(i, name))
-        if not is_updated(name):
+        if (not is_updated(name)) or args.ignoreupdated:
             try:
                 content, channels = scrape(name)
             except snscrape.base.ScraperException as e:
@@ -155,12 +155,17 @@ def scrape_step(limit=None, random=False):
                 last_updated.to_sql("updates", con=conn, if_exists="append")
 
         else:
-            print("skiping as already parsed, last updated: {}".format(last_updated))
+            print("skiping as already parsed")
 
     update_channels()
 
 
 if __name__ == "__main__":
-    while True:
-        update_channels()
-        scrape_step(random=np.random.choice([True, False]), limit=10)
+    if args.channel:
+        channels = [args.channel]
+        scrape_step(channels)
+    else:
+        while True:
+            update_channels()
+            channels = get_channels(random=np.random.choice([True, False]))["chname"].values
+            scrape_step(channels, limit=10)
