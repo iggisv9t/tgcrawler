@@ -3,12 +3,12 @@ import datetime
 from snscrape import modules
 import snscrape
 import os
-import sqlite3
+# import sqlite3
 from sqlalchemy import create_engine, inspect
 import numpy as np
 import argparse
 
-basepath = "tg.db"
+# basepath = "tg.db"
 today = datetime.date.today()
 defaultpath = "channels.csv"
 
@@ -18,8 +18,14 @@ parser.add_argument('--ignoreupdated', default=False)
 parser.add_argument('--seed', default=defaultpath)
 args = parser.parse_args()
 
+def get_conn():
+    with open("creds.txt") as fp:
+        creds = fp.readline().replace('\n', '')
+        conn = create_engine(creds)
+        return conn
+
 def is_exception(name):
-    exceptions = {"s", "joinchat", "c", "addstickers", "vote", ""}
+    exceptions = {"s", "joinchat", "c", "addstickers", "vote", "", 'iv'}
     name = str(name).split("?")[0]
     if name.lower().endswith("bot"):
         return True
@@ -44,23 +50,30 @@ def get_channels(random=False):
 def update_channels():
     path = args.seed
     # load seed list
-    channels_df = pd.read_csv(path)
+    channels_df = pd.read_csv(path, usecols=['chname', 'degree'])
     channels_df.dropna(subset=["chname"], inplace=True)
 
-    conn = create_engine("sqlite:///" + basepath)
+    # conn = create_engine("sqlite:///" + basepath)
+    conn = get_conn()
     insp = inspect(conn)
     # if not a first run
-    if insp.has_table("links", schema="main"):
+    if insp.has_table("links", schema="public"):
         query = """SELECT DISTINCT target_link link, target_name chname,
                  COUNT(*) degree FROM links
                 WHERE target_name != source_name
+                AND target_name NOT IN (SELECT chname FROM updates)
                 GROUP BY target_name"""
+
+        query = """SELECT target_name chname, COUNT(*) degree FROM links
+                WHERE target_name != links.source_name
+                AND target_name NOT IN (SELECT chname FROM updates)
+                GROUP BY target_name;"""
         scrapped_links = pd.read_sql(query, con=conn).drop_duplicates(
-            subset=["link", "chname"], keep="first"
+            subset=["chname"], keep="first"
         )
         print(scrapped_links.head())
         scrapped_links = pd.concat(
-            [channels_df[['link', 'chname', 'degree']], scrapped_links]
+            [channels_df[['chname', 'degree']], scrapped_links]
         )
         print(scrapped_links.head())
     else:
@@ -86,7 +99,7 @@ def update_channels():
     os.rename(path, path + ".bkp.{}".format(today.strftime("%y%m%d")))
 
     scrapped_links.sort_values("degree", ascending=False, inplace=True)
-    scrapped_links[["link", "chname", "degree"]].to_csv(
+    scrapped_links[["chname", "degree"]].to_csv(
         path, index=False
     )
 
@@ -109,9 +122,10 @@ def scrape(name):
     return content, channels
 
 def is_updated(chname):
-    conn = create_engine("sqlite:///" + basepath)
+    # conn = create_engine("sqlite:///" + basepath)
+    conn = get_conn()
     insp = inspect(conn)
-    if insp.has_table("updates", schema="main"):
+    if insp.has_table("updates", schema="public"):
         query = """SELECT * FROM updates WHERE LOWER(chname) = '{}'"""\
                 .format(str(chname).lower())
         updates = pd.read_sql(query, con=conn)
@@ -123,10 +137,11 @@ def is_updated(chname):
         return False
 
 def scrape_step(channels, limit=None):
-    for i, name in enumerate(channels):
+    i = 0
+    for name in channels:
         if not (limit is None):
             if i >= limit:
-                update_channels()
+                # update_channels()
                 break
         if is_exception(name):
             print("Entity {} skipped".format(name))
@@ -149,15 +164,16 @@ def scrape_step(channels, limit=None):
                 columns=["source_name", "target_link", "target_name", "source_link"],
             )
 
-            with sqlite3.connect(basepath) as conn:
-                content_df.to_sql("content", con=conn, if_exists="append")
-                channels_df.to_sql("links", con=conn, if_exists="append")
-                last_updated.to_sql("updates", con=conn, if_exists="append")
+            conn = get_conn()
+            content_df.to_sql("content", con=conn, if_exists="append", index=False)
+            channels_df.to_sql("links", con=conn, if_exists="append", index=False)
+            last_updated.to_sql("updates", con=conn, if_exists="append", index=False)
+            i += 1
 
         else:
             print("skiping as already parsed")
 
-    update_channels()
+    # update_channels()
 
 
 if __name__ == "__main__":
