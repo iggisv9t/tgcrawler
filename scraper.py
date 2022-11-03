@@ -3,6 +3,7 @@ import datetime
 from snscrape import modules
 import snscrape
 import os
+
 # import sqlite3
 from sqlalchemy import create_engine, inspect
 import numpy as np
@@ -13,19 +14,21 @@ today = datetime.date.today()
 defaultpath = "channels.csv"
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--channel')
-parser.add_argument('--ignoreupdated', default=False)
-parser.add_argument('--seed', default=defaultpath)
+parser.add_argument("--channel")
+parser.add_argument("--ignoreupdated", default=False)
+parser.add_argument("--seed", default=defaultpath)
 args = parser.parse_args()
+
 
 def get_conn():
     with open("creds.txt") as fp:
-        creds = fp.readline().replace('\n', '')
+        creds = fp.readline().replace("\n", "")
         conn = create_engine(creds)
         return conn
 
+
 def is_exception(name):
-    exceptions = {"s", "joinchat", "c", "addstickers", "vote", "", 'iv'}
+    exceptions = {"s", "joinchat", "c", "addstickers", "vote", "", "iv"}
     name = str(name).split("?")[0]
     if name.lower().endswith("bot"):
         return True
@@ -50,7 +53,7 @@ def get_channels(random=False):
 def update_channels():
     path = args.seed
     # load seed list
-    channels_df = pd.read_csv(path, usecols=['chname', 'degree'])
+    channels_df = pd.read_csv(path, usecols=["chname", "degree"])
     channels_df.dropna(subset=["chname"], inplace=True)
 
     # conn = create_engine("sqlite:///" + basepath)
@@ -72,9 +75,7 @@ def update_channels():
             subset=["chname"], keep="first"
         )
         print(scrapped_links.head())
-        scrapped_links = pd.concat(
-            [channels_df[['chname', 'degree']], scrapped_links]
-        )
+        scrapped_links = pd.concat([channels_df[["chname", "degree"]], scrapped_links])
         print(scrapped_links.head())
     else:
         scrapped_links = channels_df
@@ -93,15 +94,13 @@ def update_channels():
 
     # check if already scrapped
     # TODO: move it to scraping
-    
+
     print(scrapped_links.head())
     # backup old list
     os.rename(path, path + ".bkp.{}".format(today.strftime("%y%m%d")))
 
     scrapped_links.sort_values("degree", ascending=False, inplace=True)
-    scrapped_links[["chname", "degree"]].to_csv(
-        path, index=False
-    )
+    scrapped_links[["chname", "degree"]].to_csv(path, index=False)
 
 
 def scrape(name):
@@ -114,20 +113,22 @@ def scrape(name):
         if hasattr(item, "outlinks"):
             for link in item.outlinks:
                 if "t.me" in link:
-                    # TODO: fix links like utm_source=t.me 
+                    # TODO: fix links like utm_source=t.me
                     channels.append(
                         (name, link, link.split("/")[3].split("?")[0], item.url)
                     )
 
     return content, channels
 
+
 def is_updated(chname):
     # conn = create_engine("sqlite:///" + basepath)
     conn = get_conn()
     insp = inspect(conn)
     if insp.has_table("updates", schema="public"):
-        query = """SELECT * FROM updates WHERE LOWER(chname) = '{}'"""\
-                .format(str(chname).lower())
+        query = """SELECT * FROM updates WHERE LOWER(chname) = '{}'""".format(
+            str(chname).lower()
+        )
         updates = pd.read_sql(query, con=conn)
         if updates.shape[0] > 0:
             return True
@@ -135,6 +136,7 @@ def is_updated(chname):
             return False
     else:
         return False
+
 
 def scrape_step(channels, limit=None):
     i = 0
@@ -183,5 +185,7 @@ if __name__ == "__main__":
     else:
         while True:
             update_channels()
-            channels = get_channels(random=np.random.choice([True, False]))["chname"].values
+            channels = get_channels(random=np.random.choice([True, False]))[
+                "chname"
+            ].values
             scrape_step(channels, limit=10)
