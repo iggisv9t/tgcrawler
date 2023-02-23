@@ -10,8 +10,8 @@ Try to look [here](https://iggisv9t.xyz/telegram/index.html) (may require some R
 - You should have basic python knowledge to use this.
 - First create [virtualenv](https://docs.python.org/3/library/venv.html)  
 - Then install dependencies: `pip install -r requirements.txt`
-- Check source code. It expects `tg.db` sqlite3 database in `../` and `channels.csv` as seed list to start scraping.
-Database will be created automatically, just edit the `basepath` variable. `channels.csv` should be created before start. Expected columns: `chname, link, last_updated`. `chname` is channel id, link -- is source of channel (doesn't matter for seed list), `last_updated` sould be `pd.NaT` or just `NaN`.
+- Check source code. It expects `creds.txt` for sqlalchemy connection string for your DB in `./` and `channels.csv` as seed list to start scraping.
+`channels.csv` should be created before start. Expected columns: `chname, degree`, where chname is channel id, degree -- is the number of connected channels.
 
 # Usage
 `python scraper.py`
