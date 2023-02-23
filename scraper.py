@@ -17,6 +17,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--channel")
 parser.add_argument("--ignoreupdated", default=False)
 parser.add_argument("--seed", default=defaultpath)
+parser.add_argument("--lowmemory", default=False)
 args = parser.parse_args()
 
 
@@ -50,7 +51,7 @@ def get_channels(random=False):
         return pd.read_csv(path).drop_duplicates(subset="chname")
 
 
-def update_channels():
+def update_channels(low_memory=False):
     path = args.seed
     # load seed list
     channels_df = pd.read_csv(path, usecols=["chname", "degree"])
@@ -61,16 +62,16 @@ def update_channels():
     insp = inspect(conn)
     # if not a first run
     if insp.has_table("links", schema="public"):
-        query = """SELECT DISTINCT target_link link, target_name chname,
-                 COUNT(*) degree FROM links
-                WHERE target_name != source_name
-                AND target_name NOT IN (SELECT chname FROM updates)
-                GROUP BY target_name"""
-
-        query = """SELECT target_name chname, COUNT(*) degree FROM links
-                WHERE target_name != links.source_name
-                AND target_name NOT IN (SELECT chname FROM updates)
-                GROUP BY target_name;"""
+        if low_memory:
+            query = """SELECT target_name chname, COUNT(*) degree FROM links
+                    WHERE target_name != links.source_name
+                    AND target_name NOT IN (SELECT chname FROM updates)
+                    GROUP BY target_name LIMIT 500;"""
+        else:
+            query = """SELECT target_name chname, COUNT(*) degree FROM links
+                    WHERE target_name != links.source_name
+                    AND target_name NOT IN (SELECT chname FROM updates)
+                    GROUP BY target_name;"""
         scrapped_links = pd.read_sql(query, con=conn).drop_duplicates(
             subset=["chname"], keep="first"
         )
@@ -165,6 +166,8 @@ def scrape_step(channels, limit=None):
                 channels,
                 columns=["source_name", "target_link", "target_name", "source_link"],
             )
+            channels_df.drop_duplicates(subset=['source_link', 'target_link'],
+             inplace=True)
 
             conn = get_conn()
             content_df.to_sql("content", con=conn, if_exists="append", index=False)
@@ -184,8 +187,9 @@ if __name__ == "__main__":
         scrape_step(channels)
     else:
         while True:
-            update_channels()
+            update_channels(low_memory=args.lowmemory)
             channels = get_channels(random=np.random.choice([True, False]))[
                 "chname"
             ].values
             scrape_step(channels, limit=10)
+            
