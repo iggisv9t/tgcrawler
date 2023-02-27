@@ -9,7 +9,6 @@ from sqlalchemy import create_engine, inspect
 import numpy as np
 import argparse
 
-# basepath = "tg.db"
 today = datetime.date.today()
 defaultpath = "channels.csv"
 
@@ -18,6 +17,8 @@ parser.add_argument("--channel")
 parser.add_argument("--ignoreupdated", default=False)
 parser.add_argument("--seed", default=defaultpath)
 parser.add_argument("--lowmemory", default=False)
+parser.add_argument("--seeded", default=True)
+parser.add_argument("--limit", default=10, type=int)
 args = parser.parse_args()
 
 
@@ -51,13 +52,14 @@ def get_channels(random=False):
         return pd.read_csv(path).drop_duplicates(subset="chname")
 
 
-def update_channels(low_memory=False):
+def update_channels(low_memory=False, with_seed=False):
     path = args.seed
     # load seed list
-    channels_df = pd.read_csv(path, usecols=["chname", "degree"])
-    channels_df.dropna(subset=["chname"], inplace=True)
+    if with_seed:
+        channels_df = pd.read_csv(path, usecols=["chname", "degree"])
+        channels_df.dropna(subset=["chname"], inplace=True)
 
-    # conn = create_engine("sqlite:///" + basepath)
+    
     conn = get_conn()
     insp = inspect(conn)
     # if not a first run
@@ -66,7 +68,7 @@ def update_channels(low_memory=False):
             query = """SELECT target_name chname, COUNT(*) degree FROM links
                     WHERE target_name != links.source_name
                     AND target_name NOT IN (SELECT chname FROM updates)
-                    GROUP BY target_name LIMIT 500;"""
+                    GROUP BY target_name ORDER BY RANDOM() LIMIT 500;"""
         else:
             query = """SELECT target_name chname, COUNT(*) degree FROM links
                     WHERE target_name != links.source_name
@@ -75,27 +77,28 @@ def update_channels(low_memory=False):
         scrapped_links = pd.read_sql(query, con=conn).drop_duplicates(
             subset=["chname"], keep="first"
         )
+        print('scrapped_links')
         print(scrapped_links.head())
-        scrapped_links = pd.concat([channels_df[["chname", "degree"]], scrapped_links])
-        print(scrapped_links.head())
+        if with_seed:
+            print('scrapped_links with seed')
+            scrapped_links = pd.concat([channels_df[["chname", "degree"]], scrapped_links])
+            print(scrapped_links.head())
     else:
         scrapped_links = channels_df
 
-    print(scrapped_links.head())
+    
+    # print(scrapped_links.head())
     scrapped_links.dropna(subset=["chname"], inplace=True)
     scrapped_links["chname"] = scrapped_links["chname"].apply(lambda x: x.lower())
 
-    print(scrapped_links.head())
+    
+    # print(scrapped_links.head())
 
     scrapped_links.drop_duplicates(subset="chname", keep="last", inplace=True)
     scrapped_links = scrapped_links[
         ~scrapped_links["chname"].apply(is_exception)
     ].copy()
-    print(scrapped_links.head())
-
-    # check if already scrapped
-    # TODO: move it to scraping
-
+    print('Final list')
     print(scrapped_links.head())
     # backup old list
     os.rename(path, path + ".bkp.{}".format(today.strftime("%y%m%d")))
@@ -187,9 +190,9 @@ if __name__ == "__main__":
         scrape_step(channels)
     else:
         while True:
-            update_channels(low_memory=args.lowmemory)
+            update_channels(low_memory=args.lowmemory, with_seed=args.seeded)
             channels = get_channels(random=np.random.choice([True, False]))[
                 "chname"
             ].values
-            scrape_step(channels, limit=10)
+            scrape_step(channels, limit=args.limit)
             
