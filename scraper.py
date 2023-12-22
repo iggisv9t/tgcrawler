@@ -24,7 +24,8 @@ args = parser.parse_args()
 
 
 def is_exception(name):
-    exceptions = {"s", "joinchat", "c", "addstickers", "vote", "", "iv"}
+    exceptions = {"s", "joinchat", "c", "addstickers", "vote", "",
+                  "iv", "share", "proxy", "setlanguage", "addlist"}
     name = str(name).split("?")[0]
     if name.lower().endswith("bot"):
         return True
@@ -36,6 +37,8 @@ def is_exception(name):
         return True
     if name in exceptions:
         return True
+    if '-' in name:
+        return True
 
     return False
 
@@ -46,6 +49,17 @@ class Scraper(object):
         self.low_memory = low_memory
         self.with_seed = with_seed
         self.limit = limit
+        self.check_tables()
+        
+    def check_tables(self):
+        conn = self.get_conn()
+        insp = inspect(conn)
+        if not insp.has_table("updates", schema="public"):
+            # TODO: implement or make warning
+            pass
+        if not insp.has_table("links", schema="public"):
+             # TODO: implement or make warning
+            pass
 
     def get_conn(self):
         if self.conn is None:
@@ -55,11 +69,8 @@ class Scraper(object):
         return self.conn
 
     def clean_channels(self, scraped_links):
-        # print(scraped_links.head())
         scraped_links.dropna(subset=["chname"], inplace=True)
         scraped_links["chname"] = scraped_links["chname"].apply(lambda x: x.lower())
-
-        # print(scraped_links.head())
 
         scraped_links.drop_duplicates(subset="chname", keep="last", inplace=True)
         scraped_links = scraped_links[
@@ -68,21 +79,16 @@ class Scraper(object):
         return scraped_links
 
     def is_updated(self, chname):
-        # conn = create_engine("sqlite:///" + basepath)
         conn = self.get_conn()
-        # TODO: Make inspects only once in initialization
-        insp = inspect(conn)
-        if insp.has_table("updates", schema="public"):
-            query = """SELECT * FROM updates WHERE chname = '{}'""".format(
-                str(chname).lower()
-            )
-            updates = pd.read_sql(query, con=conn)
-            if updates.shape[0] > 0:
-                return True
-            else:
-                return False
+
+        query = """SELECT * FROM updates WHERE chname = '{}'""".format(
+            str(chname).lower()
+        )
+        updates = pd.read_sql(query, con=conn)
+        if updates.shape[0] > 0:
+            return True, updates['last_updated'].max().date()
         else:
-            return False
+            return False, datetime.date(year=1970, month=1, day=1)
 
     def update_channels(self):
         print('inside update_channels')
@@ -93,33 +99,29 @@ class Scraper(object):
             channels_df.dropna(subset=["chname"], inplace=True)
 
         conn = self.get_conn()
-        # TODO: Make inspects only once in initialization
-        insp = inspect(conn)
-        if insp.has_table("links", schema="public"):
-            if self.low_memory:
-                query = """SELECT target_name chname, COUNT(*) degree FROM links
-                        WHERE target_name != links.source_name
-                        GROUP BY target_name 
-                        HAVING LOWER(target_name) NOT IN (SELECT chname FROM updates) 
-                        ORDER BY RANDOM() LIMIT 500;"""
-            else:
-                query = """SELECT target_name chname, COUNT(*) degree FROM links
-                        WHERE target_name != links.source_name
-                        GROUP BY target_name
-                        HAVING LOWER(target_name) NOT IN (SELECT chname FROM updates);"""
-            scraped_links = pd.read_sql(query, con=conn).drop_duplicates(
-                subset=["chname"], keep="first"
-            )
-
-            if self.with_seed:
-                print("scraped_links with seed")
-                scraped_links = pd.concat(
-                    [channels_df[["chname", "degree"]], scraped_links]
-                )
-                print(scraped_links.head())
+        
+        if self.low_memory:
+            query = """SELECT target_name chname, COUNT(*) degree FROM links
+                    WHERE target_name != links.source_name
+                    GROUP BY target_name 
+                    HAVING LOWER(target_name) NOT IN (SELECT chname FROM updates) 
+                    ORDER BY RANDOM() LIMIT 500;"""
         else:
-            scraped_links = channels_df
+            query = """SELECT target_name chname, COUNT(*) degree FROM links
+                    WHERE target_name != links.source_name
+                    GROUP BY target_name
+                    HAVING LOWER(target_name) NOT IN (SELECT chname FROM updates);"""
+        scraped_links = pd.read_sql(query, con=conn).drop_duplicates(
+            subset=["chname"], keep="first"
+        )
 
+        if self.with_seed:
+            print("scraped_links with seed")
+            scraped_links = pd.concat(
+                [channels_df[["chname", "degree"]], scraped_links]
+            )
+            print(scraped_links.head())
+    
         scraped_links = self.clean_channels(scraped_links)
 
         # backup old list
@@ -131,11 +133,15 @@ class Scraper(object):
 
         return scraped_links[["chname", "degree"]]
 
-    def scrape(self, name):
+    def scrape(self, name, stop_date):
         scraper = modules.telegram.TelegramChannelScraper(name)
         channels = []
         content = []
         for item in scraper.get_items():
+            # print(type(item.date))
+            if item.date.replace(tzinfo=None) < pd.to_datetime(stop_date):
+                return content, channels
+            
             if hasattr(item, "content"):
                 content.append((item.url, item.content, item.date))
             if hasattr(item, "outlinks"):
@@ -165,9 +171,20 @@ class Scraper(object):
                 continue
 
             print("{}, {} scraping channel: {}".format(j, i, name))
-            if (not self.is_updated(name)) or args.ignoreupdated:
+
+
+            if args.ignoreupdated:
+                stop_date = datetime.date(year=1970, month=1, day=1)
+                is_updated = False
+            else:
+                is_updated, stop_date = self.is_updated(name)
+            
+            # print(stop_date, type(stop_date))
+            # print(today, type(today))
+            if datetime.timedelta(days=1) < abs(stop_date - today):
+                # print('parsing')
                 try:
-                    content, channels = self.scrape(name)
+                    content, channels = self.scrape(name, stop_date)
                 except snscrape.base.ScraperException as e:
                     print(
                         "channel {} not scrapped due to exception: {}".format(name, e)
@@ -211,6 +228,7 @@ class Scraper(object):
                         ~channels_df["target_name"].apply(lambda x: is_exception(x))
                     ].copy()
 
+                # Push to DB
                 conn = self.get_conn()
                 if len(content) > 0:
                     content_df.to_sql("content", con=conn, if_exists="append", index=False)
