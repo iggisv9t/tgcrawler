@@ -1,2 +1,4 @@
 pandas
 snscrape
+sqlalchemy
+psycopg2-binary
